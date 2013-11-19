@@ -18,8 +18,12 @@ import java.security.MessageDigest
 import java.util.Arrays
 import java.security.Key
 import play.api.libs.json.Json
+import play.api.mvc.Results._
+import play.api.libs.json.JsValue
+import play.api.libs.json.JsSuccess
+import play.api.libs.json.JsError
 
-package object AeviKey {
+package object AeviSecurity {
     val getKey: Key = {
         val applicationSecret = current.configuration.getString("application.secret").getOrElse(throw new Exception("application secret is not configured"))
 
@@ -27,7 +31,10 @@ package object AeviKey {
         val trimedKey = Arrays.copyOf(sha.digest(applicationSecret.getBytes("UTF-8")), 16)
         new SecretKeySpec(trimedKey, "AES")
     }
+    val getCipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
 }
+
+class CsrfRequest[A](val username: String, request: Request[A]) extends WrappedRequest[A](request)
 
 object GetAction extends ActionBuilder[Request] {
     def invokeBlock[A](request: Request[A], block: (Request[A]) => Future[SimpleResult]) = {
@@ -39,41 +46,46 @@ object GetAction extends ActionBuilder[Request] {
         block(request)
     }
 
-    //  override def composeAction[A](action: Action[A]) = AeviCSRFCheck(action)
-
     def encrypt(username: String): String = {
         val nounce = UUID.randomUUID().toString
         val expiry = DateTime.now.plus(Period.minutes(15))
         val payload = Json.stringify(Json.obj("username" -> username, "expiry" -> expiry, "nounce" -> nounce)).getBytes("UTF8")
 
-        val cipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
-        val key = AeviKey.getKey
+        val cipher = AeviSecurity.getCipher
+        val key = AeviSecurity.getKey
         cipher.init(Cipher.ENCRYPT_MODE, key)
         val cipherText = cipher.doFinal(payload)
         new String(Base64.encodeBase64(cipherText))
     }
 }
 
-object PostAction extends ActionBuilder[Request] {
-    def invokeBlock[A](request: Request[A], block: (Request[A]) => Future[SimpleResult]) = {
+object PostAction extends ActionBuilder[CsrfRequest] {
+    def invokeBlock[A](request: Request[A], block: (CsrfRequest[A]) => Future[SimpleResult]) = {
         val decrypted = decrypt(request.headers.get("token").get)
         println("decrypted => " + decrypted)
 
         val username = (Json.parse(decrypted) \ "username").as[String]
-        val expiry = (Json.parse(decrypted) \ "expiry")
-        println ("username => " + username)
-        println ("expiry => " + expiry)
-        block(request)
+        val expiry = (Json.parse(decrypted) \ "expiry").as[Long]
+        println("username => " + username)
+        println("expiry => " + expiry)
+        val jsPayload = request.body.asInstanceOf[AnyContentAsJson].asJson.get
+        val jsUsername = (jsPayload \ "username").asOpt[String].get
+
+        if (new DateTime(expiry).isBefore(DateTime.now))
+            Future.successful(BadRequest("The token is expired"))
+        else if (jsUsername != username)
+            Future.successful(BadRequest("The usernme is invalid"))
+        else {
+            block(new CsrfRequest(username, request))
+        }
     }
-    //  override def composeAction[A](action: Action[A]) = CSRFAddToken(action)
 
     def decrypt(token: String) = {
-        val key = AeviKey.getKey
+        val key = AeviSecurity.getKey
 
-        val cipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
+        val cipher = AeviSecurity.getCipher
         cipher.init(Cipher.DECRYPT_MODE, key);
 
-        println("size: " + token.getBytes.length)
         val decoded = Base64.decodeBase64(token.getBytes)
         val newPlainText = cipher.doFinal(decoded);
         System.out.println("Finish decryption: ");
