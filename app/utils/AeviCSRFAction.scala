@@ -54,8 +54,7 @@ package object AeviSecurity {
 
         cipher.init(Cipher.DECRYPT_MODE, key);
         val decoded = Base64.decodeBase64(token.getBytes)
-        val newPlainText = cipher.doFinal(decoded);
-        System.out.println("Finish decryption: ");
+        val newPlainText = cipher.doFinal(decoded)
 
         new String(newPlainText, "UTF8")
     }
@@ -93,7 +92,7 @@ object PostAction extends ActionBuilder[Request] {
                         case _ => Future.successful(BadRequest("The token is invalid"))
                     }
                 } catch {
-                    case e: IllegalBlockSizeException => Future.successful(BadRequest("The token is damaged1"))
+                    case e: IllegalBlockSizeException => Future.successful(BadRequest("The token is damaged"))
                 }
             }
             case _ => Future.successful(BadRequest("The request header is invalid"))
