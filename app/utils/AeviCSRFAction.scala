@@ -61,8 +61,6 @@ package object AeviSecurity {
     }
 }
 
-//class CsrfRequest[A](val username: String, request: Request[A]) extends WrappedRequest[A](request)
-
 object GetAction extends ActionBuilder[Request] {
     def invokeBlock[A](request: Request[A], block: (Request[A]) => Future[SimpleResult]) = {
         request.headers.get("username") match {
